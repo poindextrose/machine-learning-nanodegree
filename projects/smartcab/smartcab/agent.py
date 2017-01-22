@@ -12,7 +12,7 @@ class LearningAgent(Agent):
     """ An agent that learns to drive in the Smartcab world.
         This is the object you will be modifying. """
 
-    def __init__(self, env, learning=False, epsilon=1.0, alpha=0.5):
+    def __init__(self, env, learning=False, epsilon=1.0, alpha=0.5, decay_func=None):
         super(LearningAgent, self).__init__(env)  # Set the agent in the evironment
         self.planner = RoutePlanner(self.env, self)  # Create a route planner
         self.valid_actions = self.env.valid_actions  # The set of valid actions
@@ -22,8 +22,10 @@ class LearningAgent(Agent):
         self.Q = dict()  # Create a Q-table which will be a dictionary of tuples
         self.epsilon = epsilon  # Random exploration factor
         self.alpha = alpha  # Learning factor
-        self.epsilon_decay = 0.05
-        self.gamma = 1
+        self.initial_epsilon = epsilon
+        self.epsilon_linear_decay = 0.01
+        self.decay_func = decay_func
+        self.trial = 0
 
     def reset(self, destination=None, testing=False):
         """ The reset function is called at the beginning of each trial.
@@ -33,10 +35,16 @@ class LearningAgent(Agent):
         # Select the destination as the new location to route to
         self.planner.route_to(destination)
 
-        # Update epsilon using a decay function of your choice
-        self.epsilon -= self.epsilon_decay
         if testing:
             self.epsilon = self.alpha = 0
+            return
+
+        # Update epsilon using the provided decay function otherwise use a linear decay
+        if self.decay_func:
+            self.epsilon = self.decay_func(self.initial_epsilon, self.trial)
+        else:
+            self.epsilon -= self.epsilon_linear_decay
+        self.trial += 1
         return None
 
 
@@ -102,7 +110,7 @@ class LearningAgent(Agent):
         # When learning, implement the value iteration update rule
         #   Use only the learning rate 'alpha' (do not use the discount factor 'gamma')
         if self.learning:
-            self.Q[state][action] += self.alpha * (reward + self.gamma * self.get_maxQ(state) - self.Q[state][action])
+            self.Q[state][action] += self.alpha * (reward + self.get_maxQ(state) - self.Q[state][action])
         return
 
     def update(self):
@@ -131,13 +139,34 @@ def run():
     #   grid_size   - discrete number of intersections (columns, rows), default is (8, 6)
     env = Environment()
 
+    tolerance = 0.0001
+    total_trials = 500
+
+    def linear_decay(epsilon, trial):
+        """Linear decay of epsilon"""
+        decay_rate = 1. / total_trials
+        return epsilon - trial*decay_rate
+
+    def cos_decay(epsilon, trial):
+        """Start decaying epsilon very slowly with cosine function. trial is 0-based index"""
+        a = math.pi / 2 / (total_trials - 1)
+        return epsilon * math.cos(a * trial)
+
+    def exp_decay(epsilon, trial):
+        """Exponential decay of epsilon"""
+        # the final epsilon is reach when tolerance = e^(a * trials)
+        # therefore ln(tolerance) = -at, so that
+        # a = ln(tolerance) / trials where t is the total number of trials
+        a = math.log(tolerance) / (total_trials - 1)
+        return math.exp(a * trial)
     ##############
     # Create the driving agent
     # Flags:
     #   learning   - set to True to force the driving agent to use Q-learning
     #    * epsilon - continuous value for the exploration factor, default is 1
     #    * alpha   - continuous value for the learning rate, default is 0.5
-    agent = env.create_agent(LearningAgent, learning=True)
+    #    * decay_func - epsilon decay function
+    agent = env.create_agent(LearningAgent, learning=True, epsilon=1, alpha=0.1, decay_func=linear_decay)
 
     ##############
     # Follow the driving agent
@@ -152,14 +181,14 @@ def run():
     #   display      - set to False to disable the GUI if PyGame is enabled
     #   log_metrics  - set to True to log trial and simulation results to /logs
     #   optimized    - set to True to change the default log file name
-    sim = Simulator(env, update_delay=0.00, log_metrics=True)
+    sim = Simulator(env, update_delay=0, log_metrics=True, optimized=True)
 
     ##############
     # Run the simulator
     # Flags:
     #   tolerance  - epsilon tolerance before beginning testing, default is 0.05 
     #   n_test     - discrete number of testing trials to perform, default is 0
-    sim.run(n_test=10)
+    sim.run(n_test=10, tolerance=tolerance)
 
 
 if __name__ == '__main__':
